@@ -1,0 +1,99 @@
+	Classification 
+
+
+
+1. What all things are changed in this release
+2. Entire classification flow
+	1. Jobs Queue
+	2. Actual Classification flow
+3. Known limitations/defects
+	1.invalid paths 
+	2.Updating Tags info in case of alias
+	3. FileGroup Exclusion  - Handle a case when all paths are Excluded because of  
+4. Further improvements 	
+	1. 
+	
+	
+	
+Hi all let's start with Classification session
+
+1.First of all we will see changes which were made as a part of ES 
+2. then will ses high level architecture 
+3. will see what all jobs are involved as a part of classification workflow
+4. Known limitations/ defects 
+5. Future improvements
+
+
+
+----------------------------
+
+Ok in the simplest way if you want to know  what has changed in classification because of ES is Fetching of data and updating tags in index DB.. thats it.
+to explain more -  let's say if I trigger a request for a share or a folder then as a part of classification we expand that share or folder and fetch all files present inside it.
+and finally once we receive tags info after classification we set those tags to files 
+
+earlier these 2 things were done by mxclassify.exe i.e fetging of data and updating of tags , it used to query indexDB (SQL Server) and create batches and update tags in indexDB 
+
+So all that work is now done by Java code - so in another words we have now removed mxclassify.exe and ported that code to Java
+
+
+Note for QA or everyon is while debugging we dont need to analyze mxclassify.log only refer viclient.log file 
+
+----------------------------
+
+Classification is 4 step process
+1. Batching - We create batches of 1000 files. and create classifyinput DBs 
+2. Content fetching - Using classifyinput DB info we download content (csqlite file)
+3. Classification - Actual classification ( classifyoutputDB)
+4. Indexing - classifyoutputDB data is ingested in index DB 
+
+In case of DI on prem what we do is we poll particular folder $datadir/classification/inbox in case of ALTA we have ClassificationJobsQueue 
+
+
+----------------------------
+
+SQL Server tables involved as part of classification
+
+ConfigDB 
+1. OverallSummary 				- Classification Request Page (Common table across all tenants)
+2. ClassificationBookKeeping	-  Contains list of all the files which are to be classified as a part of this request. We create new classificationBookKeeping
+									table per request and is deleted after request is completed.
+3. ClassificationFailedPaths - Separate table per tenant - contains CRID, tenantId and list of failed paths for that request 
+
+JobsDB
+1. ClassificationJobsQueue - Used for handling Jobs Framework
+
+----------------------------
+
+
+Architecture or flow can be divided into 2 parts 
+1. Jobs Framework which is kind of similar to Scan 
+2. Actual classification workflow which works in conjuction with Jobs Framework
+
+
+
+--------------------------
+
+1. Jobs Framework 
+
+When a request is triggered from UI a parent Job is created in ClassificationJobsQueue - how do we identify it is a parentJob is 
+by looking at column parentJobid if it is null then it is parent Job 
+
+Batching job polls for parent job as soon as it finds a parent Job it reads JobInput column and parses input data and queries ES and fetches list of 
+files to be classified and inserts that info in classificationBookKeeping table. 
+
+Once we have data in classificationBookKeeping we create classifyinputDBs and for each classifyinputDB we create subJob in classificationJobsQueue table
+
+and as we saw earlier Content Fetch Job polls for sub job with proceste step 1 - 0 
+it picks up that job does the work of content fetch based on device type and updates same row to proceste step 2 - 0
+
+ClassifyJob
+picks up that job does the work of classification and updates same row to proceste step 3 - 0
+
+
+ClassifyIndexJob
+picks up that job does the work of ingestion  and updates same row to proceste step 4 - 0
+
+-------------------------------------------------------
+
+
+Actual classification 
